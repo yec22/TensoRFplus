@@ -1,10 +1,10 @@
 
 dataset_name = dtu
 datadir = ../data/dtu/dtu_scan105
-expname = tensorf_dtu_scan105_VM
+expname = tensorf_dtu_scan105_mlp_VM
 basedir = ./log
 
-n_iters = 50000
+n_iters = 30000
 batch_size = 4096
 downsample_train = 2.0
 downsample_test = 2.0
@@ -26,6 +26,7 @@ model_name = TensorVMSplit
 shadingMode = MLP_Fea
 fea2denseAct = softplus
 
+pos_pe = 2
 view_pe = 2
 fea_pe = 2
 

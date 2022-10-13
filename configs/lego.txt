@@ -1,7 +1,7 @@
 
 dataset_name = blender
 datadir = ../data/nerf_synthetic/lego
-expname = tensorf_lego_VM
+expname = tensorf_lego_mlp_VM
 basedir = ./log
 
 n_iters = 30000
@@ -25,6 +25,7 @@ model_name = TensorVMSplit
 shadingMode = MLP_Fea
 fea2denseAct = softplus
 
+pos_pe = 2
 view_pe = 2
 fea_pe = 2
 
