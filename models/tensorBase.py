@@ -454,14 +454,30 @@ class TensorBase(torch.nn.Module):
         sigma = torch.zeros(xyz_sampled.shape[:-1], device=xyz_sampled.device)
         rgb = torch.zeros((*xyz_sampled.shape[:2], 3), device=xyz_sampled.device)
         geo_feat = torch.zeros((*xyz_sampled.shape[:2], self.featureC), device=xyz_sampled.device)
+        normal_map = torch.zeros(xyz_sampled.shape, device=xyz_sampled.device)
         xyz_sampled = self.normalize_coord(xyz_sampled)
         
+
+
         if ray_valid.any():
-            sigma_feat = self.compute_densityfeature(xyz_sampled[ray_valid])
-            raw_sigma, feat = self.densityModule(xyz_sampled[ray_valid], sigma_feat)
+            ray_pts = xyz_sampled[ray_valid]
+            ray_pts.requires_grad_(True)
+
+            sigma_feat = self.compute_densityfeature(ray_pts)
+            raw_sigma, feat = self.densityModule(ray_pts, sigma_feat)
             validsigma = self.feature2density(raw_sigma.squeeze())
             sigma[ray_valid] = validsigma
             geo_feat[ray_valid] = feat
+
+            d_output = torch.ones_like(validsigma, requires_grad=False, device=ray_pts.device)
+            gradients = torch.autograd.grad(
+                outputs=validsigma,
+                inputs=ray_pts,
+                grad_outputs=d_output,
+                retain_graph=True,
+                only_inputs=True)[0]
+            normal = -gradients / (torch.norm(gradients, p=2, dim=-1, keepdim=True) + 1e-8)
+            normal_map[ray_valid] = normal # [batch, sample, 3]
 
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.distance_scale)
 
@@ -488,15 +504,11 @@ class TensorBase(torch.nn.Module):
         # weight = [batch_size, sample_point]
         # normal = [batch_size, sample_point], normal = -gradient(xyz_sampled)
 
-        normal_map = torch.zeros(xyz_sampled.shape, device=xyz_sampled.device)
         orient_loss = torch.zeros((xyz_sampled.shape[0], xyz_sampled.shape[1]), device=xyz_sampled.device)
         grad_loss = torch.zeros(1, device=xyz_sampled.device)
 
         if ray_valid.any():
-            gradients = self.gradient(xyz_sampled[ray_valid])
             # grad_loss = torch.mean((torch.linalg.norm(gradients, ord=2, dim=-1) - 1.0) ** 2)
-            normal = -gradients / (torch.norm(gradients, p=2, dim=-1, keepdim=True) + 1e-8)
-            normal_map[ray_valid] = normal # [batch, sample, 3]
             orient_loss = torch.max(torch.zeros_like(weight), torch.sum(viewdirs * normal_map, dim=-1)) #[batch, sample]
 
         normal_map = torch.sum(weight[..., None] * normal_map, -2)
