@@ -45,8 +45,8 @@ def export_mesh(args):
     tensorf = eval(args.model_name)(**kwargs)
     tensorf.load(ckpt)
 
-    alpha,_ = tensorf.getDenseAlpha()
-    convert_sdf_samples_to_ply(alpha.cpu(), f'{args.ckpt[:-3]}.ply',bbox=tensorf.aabb.cpu(), level=0.005)
+    alpha,_ = tensorf.getDenseAlpha([512,512,512])
+    convert_sdf_samples_to_ply(alpha.cpu(), f'{args.ckpt[:-3]}_512.ply',bbox=tensorf.aabb.cpu(), level=0.01)
 
 
 @torch.no_grad()
@@ -259,7 +259,7 @@ def reconstruction(args):
 
             if not args.ndc_ray and iteration == update_AlphaMask_list[1]:
                 # filter rays outside the bbox
-                allrays,allrgbs = tensorf.filtering_rays(allrays,allrgbs,bbox_only=True)
+                allrays,allrgbs = tensorf.filtering_rays(allrays,allrgbs)
                 trainingSampler = SimpleSampler(allrgbs.shape[0], args.batch_size)
 
 
