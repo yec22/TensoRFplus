@@ -3,8 +3,6 @@ import os
 from tqdm.auto import tqdm
 from opt import config_parser
 
-
-
 import json, random
 from renderer import *
 from utils import *
