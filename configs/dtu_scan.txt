@@ -30,8 +30,7 @@ pos_pe = 2
 view_pe = 2
 fea_pe = 2
 
-L1_weight_inital = 8e-5
-L1_weight_rest = 4e-5
-rm_weight_mask_thre = 1e-4
+TV_weight_density = 0.1
+TV_weight_app = 0.1
 
 Orient_loss_weight = 0.1
