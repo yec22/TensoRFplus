@@ -64,18 +64,18 @@ class DTUDataset(Dataset):
         self.world_mats_np = [camera_dict['world_mat_%d' % idx].astype(np.float32) for idx in range(n_images)]
         self.scale_mats_np = [camera_dict['scale_mat_%d' % idx].astype(np.float32) for idx in range(n_images)]
 
-        if self.split == 'train':
-            images_lis = images_lis[:-4]
-            masks_lis = masks_lis[:-4]
-            n_images -= 4
-            self.world_mats_np = self.world_mats_np[:-4]
-            self.scale_mats_np = self.scale_mats_np[:-4]
-        else:
-            images_lis = images_lis[-4:]
-            masks_lis = masks_lis[-4:]
-            n_images = 4
-            self.world_mats_np = self.world_mats_np[-4:]
-            self.scale_mats_np = self.scale_mats_np[-4:]
+        # if self.split == 'train':
+        #     images_lis = images_lis[:-4]
+        #     masks_lis = masks_lis[:-4]
+        #     n_images -= 4
+        #     self.world_mats_np = self.world_mats_np[:-4]
+        #     self.scale_mats_np = self.scale_mats_np[:-4]
+        # else:
+        #     images_lis = images_lis[-4:]
+        #     masks_lis = masks_lis[-4:]
+        #     n_images = 4
+        #     self.world_mats_np = self.world_mats_np[-4:]
+        #     self.scale_mats_np = self.scale_mats_np[-4:]
 
         intrinsics_all = []
         pose_all = []

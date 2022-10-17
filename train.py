@@ -2,9 +2,6 @@
 import os
 from tqdm.auto import tqdm
 from opt import config_parser
-
-
-
 import json, random
 from renderer import *
 from utils import *
@@ -13,7 +10,6 @@ import datetime
 
 from dataLoader import dataset_dict
 import sys
-
 
 
 device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
@@ -179,12 +175,11 @@ def reconstruction(args):
         rays_train, rgb_train = allrays[ray_idx], allrgbs[ray_idx].to(device)
 
         #rgb_map, alphas_map, depth_map, weights, uncertainty
-        rgb_map, alphas_map, depth_map, weights, uncertainty, normal_map, orient_loss, eikonal_loss = renderer(rays_train, tensorf, chunk=args.batch_size,
+        rgb_map, alphas_map, depth_map, weights, uncertainty, normal_map, orient_loss, _ = renderer(rays_train, tensorf, chunk=args.batch_size,
                                 N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
 
         loss = torch.mean((rgb_map - rgb_train) ** 2)
         orient_loss = sum(orient_loss) / len(orient_loss)
-        eikonal_loss = sum(eikonal_loss) / len(eikonal_loss)
 
         # loss
         total_loss = loss
@@ -209,8 +204,6 @@ def reconstruction(args):
             summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
         if Orient_loss_weight>0:
             total_loss += Orient_loss_weight*orient_loss
-        if Eikonal_loss_weight>0:
-            total_loss += Eikonal_loss_weight*eikonal_loss
 
         optimizer.zero_grad()
         total_loss.backward()
@@ -259,9 +252,8 @@ def reconstruction(args):
 
             if not args.ndc_ray and iteration == update_AlphaMask_list[1]:
                 # filter rays outside the bbox
-                allrays,allrgbs = tensorf.filtering_rays(allrays,allrgbs)
+                allrays,allrgbs = tensorf.filtering_rays(allrays,allrgbs,bbox_only=True)
                 trainingSampler = SimpleSampler(allrgbs.shape[0], args.batch_size)
-
 
         if iteration in upsamp_list:
             n_voxels = N_voxel_list.pop(0)

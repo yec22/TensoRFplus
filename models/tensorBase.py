@@ -5,6 +5,38 @@ from .sh import eval_sh_bases
 import numpy as np
 import time
 
+def sample_pdf(bins, weights, n_samples, det=False):
+    # This implementation is from NeRF
+    # Get pdf
+    weights = weights + 1e-6  # prevent nans
+    pdf = weights / torch.sum(weights, -1, keepdim=True)
+    cdf = torch.cumsum(pdf, -1)
+    cdf = torch.cat([torch.zeros_like(cdf[..., :1]), cdf], -1)
+    # Take uniform samples
+    if det:
+        u = torch.linspace(0. + 0.5 / n_samples, 1. - 0.5 / n_samples, steps=n_samples)
+        u = u.expand(list(cdf.shape[:-1]) + [n_samples])
+    else:
+        u = torch.rand(list(cdf.shape[:-1]) + [n_samples])
+    u = u.to(bins.device)
+
+    # Invert CDF
+    u = u.contiguous()
+    inds = torch.searchsorted(cdf, u, right=True)
+    below = torch.max(torch.zeros_like(inds - 1), inds - 1)
+    above = torch.min((cdf.shape[-1] - 1) * torch.ones_like(inds), inds)
+    inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
+
+    matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
+    cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    denom = (cdf_g[..., 1] - cdf_g[..., 0])
+    denom = torch.where(denom < 1e-6, torch.ones_like(denom), denom)
+    t = (u - cdf_g[..., 0]) / denom
+    samples = bins_g[..., 0] + t * (bins_g[..., 1] - bins_g[..., 0])
+
+    return samples
 
 def positional_encoding(positions, freqs):
     freq_bands = (2**torch.arange(freqs).float()).to(positions.device)  # (F,)
@@ -264,26 +296,32 @@ class TensorBase(torch.nn.Module):
         far = mid + 1.0
         return near, far
 
-    def sample_ray(self, rays_o, rays_d, is_train=True, N_samples=-1):
-        N_samples = N_samples if N_samples>0 else self.nSamples
-        stepsize = self.stepSize
+    @torch.no_grad()
+    def sample_ray(self, rays_o, rays_d, is_train=True, Nsamples=-1):
+        N_samples = 128 if Nsamples < 128 else Nsamples
         near, far = self.get_near_far(rays_o, rays_d)
-        vec = torch.where(rays_d==0, torch.full_like(rays_d, 1e-6), rays_d)
-        rate_a = (self.aabb[1] - rays_o) / vec
-        rate_b = (self.aabb[0] - rays_o) / vec
-        t_min = torch.minimum(rate_a, rate_b).amax(-1).clamp(min=near.min(), max=far.max())
 
-        rng = torch.arange(N_samples)[None].float()
-        if is_train:
-            rng = rng.repeat(rays_d.shape[-2],1)
-            rng += torch.rand_like(rng[:,[0]])
-        step = stepsize * rng.to(rays_o.device)
-        interpx = (t_min[...,None] + step)
-
+        interpx = torch.linspace(0.0, 1.0, N_samples).to(rays_o.device)
+        interpx = near + (far - near) * interpx[None, :]
+        
         rays_pts = rays_o[...,None,:] + rays_d[...,None,:] * interpx[...,None]
+
+        xyz_sampled = self.normalize_coord(rays_pts).reshape(-1, 3)
+        sigma_feat = self.compute_densityfeature(xyz_sampled)
+        validsigma = self.feature2density(sigma_feat).reshape(rays_pts.shape[0], rays_pts.shape[1])
+        
+        dists = torch.cat((interpx[:, 1:] - interpx[:, :-1], torch.zeros_like(interpx[:, :1])), dim=-1)
+        _, weights, _ = raw2alpha(validsigma, dists * self.distance_scale)
+
+        new_interpx = sample_pdf(interpx, weights[...,:-1], 128, det=True)
+        
+        z_vals = torch.cat([interpx, new_interpx], dim=-1)
+        z_vals, _ = torch.sort(z_vals, dim=-1)
+
+        rays_pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,None]
         mask_outbbox = ((self.aabb[0]>rays_pts) | (rays_pts>self.aabb[1])).any(dim=-1)
 
-        return rays_pts, interpx, ~mask_outbbox
+        return rays_pts, z_vals, ~mask_outbbox
 
 
     def shrink(self, new_aabb, voxel_size):
@@ -355,7 +393,7 @@ class TensorBase(torch.nn.Module):
                 mask_inbbox = t_max > t_min
 
             else:
-                xyz_sampled, _,_ = self.sample_ray(rays_o, rays_d, N_samples=N_samples, is_train=False)
+                xyz_sampled, _,_ = self.sample_ray(rays_o, rays_d, Nsamples=N_samples, is_train=False)
                 mask_inbbox= (self.alphaMask.sample_alpha(xyz_sampled).view(xyz_sampled.shape[:-1]) > 0).any(-1)
 
             mask_filtered.append(mask_inbbox.cpu())
@@ -398,12 +436,12 @@ class TensorBase(torch.nn.Module):
     def numerical_gradient(self, pts, delta=1e-3):
         # pts [sample, 3]
         diff = torch.FloatTensor([[1,0,0],[0,1,0],[0,0,1]]).to(pts.device)
-        origin_sigma = self.compute_densityfeature(pts)
+        origin_sigma = self.feature2density(self.compute_densityfeature(pts))
 
         grads = []
         for i in range(len(diff)):
             dd = diff[i] * delta
-            target_sigma = self.compute_densityfeature(pts + dd)
+            target_sigma = self.feature2density(self.compute_densityfeature(pts + dd))
             diff_sigma = (target_sigma - origin_sigma) / delta
             grads += [diff_sigma]
         grads = torch.stack(grads, dim=1)
@@ -412,9 +450,8 @@ class TensorBase(torch.nn.Module):
     def gradient(self, pts):
         
         pts.requires_grad_(True)
-        sigma_feature = self.compute_densityfeature(pts)
-        raw_sigma, _ = self.densityModule(pts, sigma_feature)
-        validsigma = self.feature2density(raw_sigma)
+        sigma_feat = self.compute_densityfeature(pts)
+        validsigma = self.feature2density(sigma_feat)
         
         d_output = torch.ones_like(validsigma, requires_grad=False, device=pts.device)
         gradients = torch.autograd.grad(
@@ -424,6 +461,7 @@ class TensorBase(torch.nn.Module):
             create_graph=True,
             retain_graph=True,
             only_inputs=True)[0]
+        
         return gradients
 
     def forward(self, rays_chunk, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1):
@@ -437,7 +475,7 @@ class TensorBase(torch.nn.Module):
             dists = dists * rays_norm
             viewdirs = viewdirs / rays_norm
         else:
-            xyz_sampled, z_vals, ray_valid = self.sample_ray(rays_chunk[:, :3], viewdirs, is_train=is_train,N_samples=N_samples)
+            xyz_sampled, z_vals, ray_valid = self.sample_ray(rays_chunk[:, :3], viewdirs, is_train=is_train,Nsamples=N_samples)
             dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
         viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
         
@@ -485,11 +523,9 @@ class TensorBase(torch.nn.Module):
 
         normal_map = torch.zeros(xyz_sampled.shape, device=xyz_sampled.device)
         orient_loss = torch.zeros((xyz_sampled.shape[0], xyz_sampled.shape[1]), device=xyz_sampled.device)
-        grad_loss = torch.zeros(1, device=xyz_sampled.device)
 
         if ray_valid.any():
             gradients = self.numerical_gradient(xyz_sampled[ray_valid], 0.1*self.stepSize)
-            grad_loss = torch.mean((torch.linalg.norm(gradients, ord=2, dim=-1) - 1.0) ** 2)
             normal = -gradients / (torch.norm(gradients, p=2, dim=-1, keepdim=True) + 1e-8)
             normal_map[ray_valid] = normal # [batch, sample, 3]
             orient_loss = torch.max(torch.zeros_like(weight), torch.sum(viewdirs * normal_map, dim=-1)) #[batch, sample]
@@ -498,4 +534,4 @@ class TensorBase(torch.nn.Module):
         orient_loss = torch.sum(weight * orient_loss, -1)
         orient_loss = torch.mean(orient_loss)
 
-        return rgb_map, depth_map, normal_map, orient_loss, grad_loss
+        return rgb_map, depth_map, normal_map, orient_loss, None
