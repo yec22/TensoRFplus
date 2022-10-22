@@ -89,13 +89,12 @@ class AlphaGridMask(torch.nn.Module):
 
 
 class MLPRender_Fea(torch.nn.Module):
-    def __init__(self, inChanel, viewpe=6, feape=6, featureC=128, sigma_channel=128):
+    def __init__(self, inChanel, viewpe=6, feape=6, featureC=128):
         super(MLPRender_Fea, self).__init__()
 
-        self.in_mlpC = 2*viewpe*3 + 2*feape*inChanel + 3 + inChanel
+        self.in_mlpC = 2*viewpe*6 + 2*feape*inChanel + 6 + inChanel
         self.viewpe = viewpe
         self.feape = feape
-        self.sigma_channel = sigma_channel
         layer1 = torch.nn.Linear(self.in_mlpC, featureC)
         layer2 = torch.nn.Linear(featureC, featureC)
         layer3 = torch.nn.Linear(featureC,3)
@@ -103,8 +102,10 @@ class MLPRender_Fea(torch.nn.Module):
         self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
 
-    def forward(self, viewdirs, features):
-        indata = [features, viewdirs]
+    def forward(self, normal, viewdirs, features):
+        indata = [normal, features, viewdirs]
+        if self.viewpe > 0:
+            indata += [positional_encoding(normal, self.viewpe)]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.viewpe > 0:
@@ -186,7 +187,7 @@ class TensorBase(torch.nn.Module):
 
     def init_render_func(self, shadingMode, pos_pe, view_pe, fea_pe, featureC, device):
         if shadingMode == 'MLP_Fea':
-            self.renderModule = MLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC, featureC).to(device)
+            self.renderModule = MLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC).to(device)
         elif shadingMode == 'SH':
             self.renderModule = SHRender
         elif shadingMode == 'RGB':
@@ -490,11 +491,18 @@ class TensorBase(torch.nn.Module):
         sigma = torch.zeros(xyz_sampled.shape[:-1], device=xyz_sampled.device)
         rgb = torch.zeros((*xyz_sampled.shape[:2], 3), device=xyz_sampled.device)
         xyz_sampled = self.normalize_coord(xyz_sampled)
+
+        normal_map = torch.zeros(xyz_sampled.shape, device=xyz_sampled.device)
+        orient_loss = torch.zeros((xyz_sampled.shape[0], xyz_sampled.shape[1]), device=xyz_sampled.device)
         
         if ray_valid.any():
             sigma_feat = self.compute_densityfeature(xyz_sampled[ray_valid])
             validsigma = self.feature2density(sigma_feat)
             sigma[ray_valid] = validsigma
+
+            gradients = self.numerical_gradient(xyz_sampled[ray_valid], 0.1*self.stepSize)
+            normal = -gradients / (torch.norm(gradients, p=2, dim=-1, keepdim=True) + 1e-8)
+            normal_map[ray_valid] = normal # [batch, sample, 3]
 
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.distance_scale)
 
@@ -502,7 +510,7 @@ class TensorBase(torch.nn.Module):
 
         if app_mask.any():
             app_features = self.compute_appfeature(xyz_sampled[app_mask])
-            valid_rgbs = self.renderModule(viewdirs[app_mask], app_features)
+            valid_rgbs = self.renderModule(normal_map[app_mask], viewdirs[app_mask], app_features)
             rgb[app_mask] = valid_rgbs
 
         acc_map = weight.sum(dim=-1, keepdim=True)
@@ -521,15 +529,8 @@ class TensorBase(torch.nn.Module):
         # weight = [batch_size, sample_point]
         # normal = [batch_size, sample_point], normal = -gradient(xyz_sampled)
 
-        normal_map = torch.zeros(xyz_sampled.shape, device=xyz_sampled.device)
-        orient_loss = torch.zeros((xyz_sampled.shape[0], xyz_sampled.shape[1]), device=xyz_sampled.device)
-
         if ray_valid.any():
-            gradients = self.numerical_gradient(xyz_sampled[ray_valid], 0.1*self.stepSize)
-            normal = -gradients / (torch.norm(gradients, p=2, dim=-1, keepdim=True) + 1e-8)
-            normal_map[ray_valid] = normal # [batch, sample, 3]
             orient_loss = torch.max(torch.zeros_like(weight), torch.sum(viewdirs * normal_map, dim=-1)) #[batch, sample]
-
         normal_map = torch.sum(weight[..., None] * normal_map, -2)
         orient_loss = torch.sum(weight * orient_loss, -1)
         orient_loss = torch.mean(orient_loss)

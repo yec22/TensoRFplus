@@ -46,7 +46,7 @@ class DTUDataset(Dataset):
         self.read_meta()
 
         self.white_bg = True
-        self.near_far = [0., 6.]
+        self.near_far = [2.4, 4.6]
         
         self.center = torch.mean(self.scene_bbox, axis=0).float().view(1, 1, 3)
         self.radius = (self.scene_bbox[1] - self.center).float().view(1, 1, 3)
