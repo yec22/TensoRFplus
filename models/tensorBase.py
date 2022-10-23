@@ -292,7 +292,7 @@ class TensorBase(torch.nn.Module):
         z_vals, _ = torch.sort(z_vals, dim=-1)
 
         rays_pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,None]
-        mask_outbbox = ((self.aabb[0]>(rays_pts-2*0.01*self.stepSize)) | ((rays_pts+2*0.01*self.stepSize)>self.aabb[1])).any(dim=-1)
+        mask_outbbox = ((self.aabb[0]>rays_pts) | (rays_pts>self.aabb[1])).any(dim=-1)
 
         return rays_pts, z_vals, ~mask_outbbox
 

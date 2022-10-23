@@ -12,7 +12,7 @@ from dataLoader import dataset_dict
 import sys
 
 
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:6" if torch.cuda.is_available() else "cpu")
 
 renderer = OctreeRender_trilinear_fast
 
@@ -296,8 +296,8 @@ def reconstruction(args):
 if __name__ == '__main__':
 
     torch.set_default_dtype(torch.float32)
-    torch.manual_seed(20221023)
-    np.random.seed(20221023)
+    torch.manual_seed(20220905)
+    np.random.seed(20220905)
 
     args = config_parser()
     print(args)
