@@ -236,8 +236,6 @@ def reconstruction(args):
             summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
             
 
-
-
         if iteration in update_AlphaMask_list:
 
             if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
@@ -248,7 +246,6 @@ def reconstruction(args):
                 # tensorVM.alphaMask = None
                 L1_reg_weight = args.L1_weight_rest
                 print("continuing L1_reg_weight", L1_reg_weight)
-
 
             if not args.ndc_ray and iteration == update_AlphaMask_list[1]:
                 # filter rays outside the bbox
@@ -299,8 +296,8 @@ def reconstruction(args):
 if __name__ == '__main__':
 
     torch.set_default_dtype(torch.float32)
-    torch.manual_seed(20220905)
-    np.random.seed(20220905)
+    torch.manual_seed(20221023)
+    np.random.seed(20221023)
 
     args = config_parser()
     print(args)

@@ -33,7 +33,7 @@ def config_parser(cmd=None):
     # training options
     # learning rate
     parser.add_argument("--lr_init", type=float, default=0.01,
-                        help='learning rate')    
+                        help='learning rate')
     parser.add_argument("--lr_basis", type=float, default=5e-4,
                         help='learning rate')
     parser.add_argument("--lr_decay_iters", type=int, default=-1,
@@ -63,8 +63,8 @@ def config_parser(cmd=None):
     # volume options
     parser.add_argument("--n_lamb_sigma", type=int, action="append")
     parser.add_argument("--n_lamb_sh", type=int, action="append")
-    parser.add_argument("--data_dim_color", type=int, default=9)
-    parser.add_argument("--data_dim_sigma", type=int, default=9)
+    parser.add_argument("--data_dim_color", type=int, default=12)
+    parser.add_argument("--data_dim_sigma", type=int, default=1)
 
     parser.add_argument("--rm_weight_mask_thre", type=float, default=0.0001,
                         help='mask points in ray marching')

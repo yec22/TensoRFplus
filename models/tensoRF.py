@@ -10,6 +10,7 @@ class TensorVMSplit(TensorBase):
         self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, self.gridSize, 0.1, device)
         self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.gridSize, 0.1, device)
         self.basis_mat = torch.nn.Linear(sum(self.app_n_comp), self.app_dim, bias=False).to(device)
+        self.density_mat = torch.nn.Linear(sum(self.density_n_comp), self.sigma_dim, bias=False).to(device)
 
 
     def init_one_svd(self, n_component, gridSize, scale, device):
@@ -18,7 +19,7 @@ class TensorVMSplit(TensorBase):
             vec_id = self.vecMode[i]
             mat_id_0, mat_id_1 = self.matMode[i]
             plane_coef.append(torch.nn.Parameter(
-                scale * torch.randn((1, n_component[i], gridSize[mat_id_1], gridSize[mat_id_0]))))  #
+                scale * torch.randn((1, n_component[i], gridSize[mat_id_1], gridSize[mat_id_0]))))
             line_coef.append(
                 torch.nn.Parameter(scale * torch.randn((1, n_component[i], gridSize[vec_id], 1))))
 
@@ -29,7 +30,9 @@ class TensorVMSplit(TensorBase):
     def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001):
         grad_vars = [{'params': self.density_line, 'lr': lr_init_spatialxyz}, {'params': self.density_plane, 'lr': lr_init_spatialxyz},
                      {'params': self.app_line, 'lr': lr_init_spatialxyz}, {'params': self.app_plane, 'lr': lr_init_spatialxyz},
-                         {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
+                         {'params': self.basis_mat.parameters(), 'lr':lr_init_network},
+                         {'params': self.density_mat.parameters(), 'lr':lr_init_network}]
+
         if isinstance(self.renderModule, torch.nn.Module):
             grad_vars += [{'params':self.renderModule.parameters(), 'lr':lr_init_network}]
         
@@ -74,20 +77,18 @@ class TensorVMSplit(TensorBase):
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
 
-        sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
+        plane_coef_point,line_coef_point = [],[]
         for idx_plane in range(len(self.density_plane)):
-            plane_coef_point = F.grid_sample(self.density_plane[idx_plane], coordinate_plane[[idx_plane]],
-                                                align_corners=True).view(-1, *xyz_sampled.shape[:1])
-            line_coef_point = F.grid_sample(self.density_line[idx_plane], coordinate_line[[idx_plane]],
-                                            align_corners=True).view(-1, *xyz_sampled.shape[:1])
-            sigma_feature = sigma_feature + torch.sum(plane_coef_point * line_coef_point, dim=0)
+            plane_coef_point.append(F.grid_sample(self.density_plane[idx_plane], coordinate_plane[[idx_plane]],
+                                                align_corners=True).view(-1, *xyz_sampled.shape[:1]))
+            line_coef_point.append(F.grid_sample(self.density_line[idx_plane], coordinate_line[[idx_plane]],
+                                            align_corners=True).view(-1, *xyz_sampled.shape[:1]))
+        plane_coef_point, line_coef_point = torch.cat(plane_coef_point), torch.cat(line_coef_point)
 
-        return sigma_feature
-
+        return self.density_mat((plane_coef_point * line_coef_point).T)
 
 
     def compute_appfeature(self, xyz_sampled):
-
         # plane + line basis
         coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
@@ -101,9 +102,7 @@ class TensorVMSplit(TensorBase):
                                             align_corners=True).view(-1, *xyz_sampled.shape[:1]))
         plane_coef_point, line_coef_point = torch.cat(plane_coef_point), torch.cat(line_coef_point)
 
-
         return self.basis_mat((plane_coef_point * line_coef_point).T)
-
 
 
     @torch.no_grad()
