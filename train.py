@@ -42,6 +42,8 @@ def export_mesh(args):
     tensorf.load(ckpt)
 
     alpha,_ = tensorf.getDenseAlpha([512,512,512])
+    print(alpha.shape)
+    print(alpha.min(), alpha.max())
     convert_sdf_samples_to_ply(alpha.cpu(), f'{args.ckpt[:-3]}_512.ply',bbox=tensorf.aabb.cpu(), level=0.01)
 
 

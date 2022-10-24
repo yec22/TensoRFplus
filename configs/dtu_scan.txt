@@ -1,7 +1,7 @@
 
 dataset_name = dtu
 datadir = ../data/dtu/dtu_scan105
-expname = tensorf_dtu_scan105_SP_VM
+expname = tensorf_dtu_scan105_VM
 basedir = ./log
 
 n_iters = 30000

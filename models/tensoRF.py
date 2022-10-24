@@ -85,7 +85,7 @@ class TensorVMSplit(TensorBase):
                                             align_corners=True).view(-1, *xyz_sampled.shape[:1]))
         plane_coef_point, line_coef_point = torch.cat(plane_coef_point), torch.cat(line_coef_point)
 
-        return self.density_mat((plane_coef_point * line_coef_point).T)
+        return self.density_mat((plane_coef_point * line_coef_point).T), (plane_coef_point * line_coef_point).T
 
 
     def compute_appfeature(self, xyz_sampled):
