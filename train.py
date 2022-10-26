@@ -12,7 +12,7 @@ from dataLoader import dataset_dict
 import sys
 
 
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:5" if torch.cuda.is_available() else "cpu")
 
 renderer = OctreeRender_trilinear_fast
 
@@ -176,7 +176,7 @@ def reconstruction(args):
 
         #rgb_map, alphas_map, depth_map, weights, uncertainty
         rgb_map, alphas_map, depth_map, weights, uncertainty, normal_map, orient_loss, _ = renderer(rays_train, tensorf, chunk=args.batch_size,
-                                N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
+                                N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True, device=device)
 
         loss = torch.mean((rgb_map - rgb_train) ** 2)
         orient_loss = sum(orient_loss) / len(orient_loss)

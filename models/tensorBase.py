@@ -89,23 +89,23 @@ class AlphaGridMask(torch.nn.Module):
 
 
 class MLPRender_Fea(torch.nn.Module):
-    def __init__(self, inChanel, viewpe=6, feape=6, featureC=128):
+    def __init__(self, inChanel, viewpe=6, feape=6, featureC=128, geo_channel=9):
         super(MLPRender_Fea, self).__init__()
 
-        self.in_mlpC = 2*viewpe*6 + 2*feape*inChanel + 6 + inChanel
+        self.in_mlpC = 2*viewpe*3 + 2*feape*inChanel + 3 + inChanel + 2*feape*geo_channel + geo_channel
         self.viewpe = viewpe
         self.feape = feape
         layer1 = torch.nn.Linear(self.in_mlpC, featureC)
         layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC,3)
+        layer3 = torch.nn.Linear(featureC, 3)
 
         self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
 
-    def forward(self, normal, viewdirs, features):
-        indata = [normal, features, viewdirs]
-        if self.viewpe > 0:
-            indata += [positional_encoding(normal, self.viewpe)]
+    def forward(self, geo_feat, viewdirs, features):
+        indata = [geo_feat, features, viewdirs]
+        if self.feape > 0:
+            indata += [positional_encoding(geo_feat, self.feape)]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.viewpe > 0:
@@ -117,30 +117,25 @@ class MLPRender_Fea(torch.nn.Module):
         return rgb
 
 class MLPDensity(torch.nn.Module):
-    def __init__(self, inChanel, posepe=6, feape=6, featureC=128):
+    def __init__(self, inChanel, feape=6, featureC=128):
         super(MLPDensity, self).__init__()
 
-        self.in_mlpC = 2*posepe*3 + 2*feape*inChanel + 3 + inChanel
-        self.posepe = posepe
+        self.in_mlpC = 2*feape*inChanel + inChanel
         self.feape = feape
         self.layer1 = torch.nn.Linear(self.in_mlpC, featureC)
-        self.layer2 = torch.nn.Linear(featureC, featureC)
-        self.layer3 = torch.nn.Linear(featureC,1)
+        self.layer2 = torch.nn.Linear(featureC, 1)
 
         self.actv = torch.nn.ReLU(inplace=True)
-        torch.nn.init.constant_(self.layer3.bias, 0)
+        torch.nn.init.constant_(self.layer2.bias, 0)
 
-    def forward(self, pts, features):
-        indata = [pts, features]
-        if self.posepe > 0:
-            indata += [positional_encoding(pts, self.posepe)]
+    def forward(self, features):
+        indata = [features]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         mlp_in = torch.cat(indata, dim=-1)
-        feat = self.layer2(self.actv(self.layer1(mlp_in)))
-        sigma = self.layer3(self.actv(feat))
+        sigma = self.layer2(self.actv(self.layer1(mlp_in)))
 
-        return sigma, feat
+        return sigma
 
 
 class TensorBase(torch.nn.Module):
@@ -177,17 +172,16 @@ class TensorBase(torch.nn.Module):
         self.vecMode =  [2, 1, 0]
         self.comp_w = [1,1,1]
 
-
         self.init_svd_volume(gridSize[0], device)
 
         self.shadingMode, self.pos_pe, self.view_pe, self.fea_pe, self.featureC = shadingMode, pos_pe, view_pe, fea_pe, featureC
         self.init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, device)
-        # self.init_density_func(pos_pe, fea_pe, featureC, device)
+        self.init_density_func(fea_pe, featureC, device)
 
 
     def init_render_func(self, shadingMode, pos_pe, view_pe, fea_pe, featureC, device):
         if shadingMode == 'MLP_Fea':
-            self.renderModule = MLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC).to(device)
+            self.renderModule = MLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC, self.sigma_dim).to(device)
         elif shadingMode == 'SH':
             self.renderModule = SHRender
         elif shadingMode == 'RGB':
@@ -199,9 +193,8 @@ class TensorBase(torch.nn.Module):
         print("pos_pe", pos_pe, "view_pe", view_pe, "fea_pe", fea_pe)
         print(self.renderModule)
     
-    def init_density_func(self, pos_pe, fea_pe, featureC, device):
-        self.densityModule = MLPDensity(self.sigma_dim, pos_pe, fea_pe, featureC).to(device)
-        print("pos_pe", pos_pe, "fea_pe", fea_pe)
+    def init_density_func(self, fea_pe, featureC, device):
+        self.densityModule = MLPDensity(self.sigma_dim, fea_pe, featureC).to(device)
         print(self.densityModule)
 
     def update_stepSize(self, gridSize):
@@ -309,6 +302,7 @@ class TensorBase(torch.nn.Module):
 
         xyz_sampled = self.normalize_coord(rays_pts).reshape(-1, 3)
         sigma_feat = self.compute_densityfeature(xyz_sampled)
+        sigma_feat = self.densityModule(sigma_feat).squeeze()
         validsigma = self.feature2density(sigma_feat).reshape(rays_pts.shape[0], rays_pts.shape[1])
         
         dists = torch.cat((interpx[:, 1:] - interpx[:, :-1], torch.zeros_like(interpx[:, :1])), dim=-1)
@@ -426,6 +420,7 @@ class TensorBase(torch.nn.Module):
         if alpha_mask.any():
             xyz_sampled = self.normalize_coord(xyz_locs[alpha_mask])
             sigma_feat = self.compute_densityfeature(xyz_sampled)
+            sigma_feat = self.densityModule(sigma_feat).squeeze()
             validsigma = self.feature2density(sigma_feat)
             sigma[alpha_mask] = validsigma
         
@@ -437,12 +432,12 @@ class TensorBase(torch.nn.Module):
     def numerical_gradient(self, pts, delta=1e-3):
         # pts [sample, 3]
         diff = torch.FloatTensor([[1,0,0],[0,1,0],[0,0,1]]).to(pts.device)
-        origin_sigma = self.feature2density(self.compute_densityfeature(pts))
+        origin_sigma = self.feature2density(self.densityModule(self.compute_densityfeature(pts)).squeeze())
 
         grads = []
         for i in range(len(diff)):
             dd = diff[i] * delta
-            target_sigma = self.feature2density(self.compute_densityfeature(pts + dd))
+            target_sigma = self.feature2density(self.densityModule(self.compute_densityfeature(pts + dd)).squeeze())
             diff_sigma = (target_sigma - origin_sigma) / delta
             grads += [diff_sigma]
         grads = torch.stack(grads, dim=1)
@@ -452,6 +447,7 @@ class TensorBase(torch.nn.Module):
         
         pts.requires_grad_(True)
         sigma_feat = self.compute_densityfeature(pts)
+        sigma_feat = self.densityModule(sigma_feat).squeeze()
         validsigma = self.feature2density(sigma_feat)
         
         d_output = torch.ones_like(validsigma, requires_grad=False, device=pts.device)
@@ -494,13 +490,16 @@ class TensorBase(torch.nn.Module):
 
         normal_map = torch.zeros(xyz_sampled.shape, device=xyz_sampled.device)
         orient_loss = torch.zeros((xyz_sampled.shape[0], xyz_sampled.shape[1]), device=xyz_sampled.device)
+        geo_features = torch.zeros((*xyz_sampled.shape[:2], self.sigma_dim), device=xyz_sampled.device)
         
         if ray_valid.any():
             sigma_feat = self.compute_densityfeature(xyz_sampled[ray_valid])
+            geo_features[ray_valid] = sigma_feat
+            sigma_feat = self.densityModule(sigma_feat).squeeze()
             validsigma = self.feature2density(sigma_feat)
             sigma[ray_valid] = validsigma
 
-            gradients = self.numerical_gradient(xyz_sampled[ray_valid], 0.1*self.stepSize)
+            gradients = self.gradient(xyz_sampled[ray_valid])
             normal = -gradients / (torch.norm(gradients, p=2, dim=-1, keepdim=True) + 1e-8)
             normal_map[ray_valid] = normal # [batch, sample, 3]
 
@@ -510,7 +509,7 @@ class TensorBase(torch.nn.Module):
 
         if app_mask.any():
             app_features = self.compute_appfeature(xyz_sampled[app_mask])
-            valid_rgbs = self.renderModule(normal_map[app_mask], viewdirs[app_mask], app_features)
+            valid_rgbs = self.renderModule(geo_features[app_mask], viewdirs[app_mask], app_features)
             rgb[app_mask] = valid_rgbs
 
         acc_map = weight.sum(dim=-1, keepdim=True)

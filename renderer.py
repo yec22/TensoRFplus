@@ -16,6 +16,14 @@ def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(device)
     
         rgb_map, depth_map, normal_map, orient_loss, grad_loss = tensorf(rays_chunk, is_train=is_train, white_bg=white_bg, ndc_ray=ndc_ray, N_samples=N_samples)
+        
+        if not is_train:
+            rgb_map = rgb_map.detach()
+            depth_map = depth_map.detach()
+            normal_map = normal_map.detach()
+            orient_loss = orient_loss.detach()
+            tensorf.zero_grad()
+            torch.cuda.empty_cache()
 
         rgbs.append(rgb_map)
         depth_maps.append(depth_map)
@@ -35,7 +43,6 @@ def get_near_far(rays_o, rays_d):
     return near.min().numpy(), far.max().numpy()
 
 
-@torch.no_grad()
 def evaluation(test_dataset,tensorf, args, renderer, savePath=None, N_vis=5, prtx='', N_samples=-1,
                white_bg=False, ndc_ray=False, compute_extra_metrics=True, device='cuda'):
     PSNRs, rgb_maps, depth_maps, normal_maps = [], [], [], []
@@ -56,8 +63,8 @@ def evaluation(test_dataset,tensorf, args, renderer, savePath=None, N_vis=5, prt
         rays = samples.view(-1,samples.shape[-1])
 
         near_far = get_near_far(rays[:,:3], rays[:,3:])
-        rgb_map, _, depth_map, _, _, normal_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
-                                        ndc_ray=ndc_ray, white_bg = white_bg, device=device)
+        rgb_map, _, depth_map, _, _, normal_map, _, _ = renderer(rays, tensorf, chunk=2048, N_samples=N_samples,
+                                        ndc_ray=ndc_ray, white_bg = white_bg, is_train=False, device=device)
         rgb_map = rgb_map.clamp(0.0, 1.0)
 
         rgb_map, depth_map = rgb_map.reshape(H, W, 3).cpu(), depth_map.reshape(H, W).cpu()
@@ -131,7 +138,7 @@ def evaluation_path(test_dataset,tensorf, c2ws, renderer, savePath=None, N_vis=5
         near_far = get_near_far(rays[:,:3], rays[:,3:])
 
         rgb_map, _, depth_map, _, _, _, _, _ = renderer(rays, tensorf, chunk=8192, N_samples=N_samples,
-                                        ndc_ray=ndc_ray, white_bg = white_bg, device=device)
+                                        ndc_ray=ndc_ray, white_bg = white_bg, is_train = False, device=device)
         rgb_map = rgb_map.clamp(0.0, 1.0)
 
         rgb_map, depth_map = rgb_map.reshape(H, W, 3).cpu(), depth_map.reshape(H, W).cpu()

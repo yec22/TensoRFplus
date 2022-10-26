@@ -19,8 +19,7 @@ vis_every = 2000
 
 render_test = 1
 
-n_lamb_sigma = [24,24,24]
-n_lamb_sh = [24,24,24]
+n_lamb_sh = [18,18,18]
 model_name = TensorVMSplit
 
 shadingMode = MLP_Fea
