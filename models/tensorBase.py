@@ -8,7 +8,7 @@ import time
 def sample_pdf(bins, weights, n_samples, det=False):
     # This implementation is from NeRF
     # Get pdf
-    weights = weights + 1e-6  # prevent nans
+    weights = weights + 1e-8  # prevent nans
     pdf = weights / torch.sum(weights, -1, keepdim=True)
     cdf = torch.cumsum(pdf, -1)
     cdf = torch.cat([torch.zeros_like(cdf[..., :1]), cdf], -1)
@@ -32,7 +32,7 @@ def sample_pdf(bins, weights, n_samples, det=False):
     bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
 
     denom = (cdf_g[..., 1] - cdf_g[..., 0])
-    denom = torch.where(denom < 1e-6, torch.ones_like(denom), denom)
+    denom = torch.where(denom < 1e-8, torch.ones_like(denom), denom)
     t = (u - cdf_g[..., 0]) / denom
     samples = bins_g[..., 0] + t * (bins_g[..., 1] - bins_g[..., 0])
 
@@ -49,7 +49,7 @@ def raw2alpha(sigma, dist):
     # sigma, dist  [N_rays, N_samples]
     alpha = 1. - torch.exp(-sigma*dist)
 
-    T = torch.cumprod(torch.cat([torch.ones(alpha.shape[0], 1).to(alpha.device), 1. - alpha + 1e-10], -1), -1)
+    T = torch.cumprod(torch.cat([torch.ones(alpha.shape[0], 1).to(alpha.device), 1. - alpha + 1e-8], -1), -1)
 
     weights = alpha * T[:, :-1]  # [N_rays, N_samples]
     return alpha, weights, T[:,-1:]

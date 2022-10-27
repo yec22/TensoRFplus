@@ -1,7 +1,7 @@
 
 dataset_name = dtu
-datadir = ../data/dtu/dtu_scan105
-expname = tensorf_dtu_scan105_VM
+datadir = ../data/dtu/dtu_scan122
+expname = tensorf_dtu_scan122_VM
 basedir = ./log
 
 n_iters = 30000
@@ -20,7 +20,7 @@ vis_every = 2000
 render_test = 1
 
 n_lamb_sigma = [24,24,24]
-n_lamb_sh = [24,24,24]
+n_lamb_sh = [12,12,12]
 model_name = TensorVMSplit
 
 shadingMode = MLP_Fea
@@ -29,7 +29,7 @@ fea2denseAct = softplus
 view_pe = 2
 fea_pe = 2
 
-TV_weight_density = 0.1
+TV_weight_density = 0.5
 TV_weight_app = 0.1
 
 Orient_loss_weight = 0.1
