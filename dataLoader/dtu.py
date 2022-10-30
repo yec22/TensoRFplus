@@ -37,8 +37,7 @@ class DTUDataset(Dataset):
         self.root_dir = datadir
         self.split = split
         self.is_stack = is_stack
-        self.img_wh = (int(1600/downsample),int(1200/downsample))
-        self.downsample = downsample
+        self.img_wh = (1600, 1200)
         self.define_transforms()
 
         self.scene_bbox = torch.tensor([[-1.5, -1.5, -1.5], [1.5, 1.5, 1.5]])
@@ -87,16 +86,13 @@ class DTUDataset(Dataset):
             intrinsics_all.append(torch.from_numpy(intrinsics).float())
             pose_all.append(torch.from_numpy(pose).float())
 
+        self.intrinsics_all = torch.stack(intrinsics_all)
+        self.intrinsics_all_inv = torch.inverse(self.intrinsics_all)
+        self.pose_all = torch.stack(pose_all)
+
         w, h = self.img_wh
-        self.focal = intrinsics_all[0][0, 0]
-        self.focal /= self.downsample
 
-        # ray directions for all pixels, same for all images (same H, W, focal)
-        self.directions = get_ray_directions(h, w, [self.focal, self.focal])  # (h, w, 3)
-        self.directions = self.directions / torch.norm(self.directions, dim=-1, keepdim=True)
-        self.intrinsics = torch.tensor([[self.focal,0,w/2],[0,self.focal,h/2],[0,0,1]]).float()
-
-        self.poses = [] 
+        self.poses = []
         self.all_rays = []
         self.all_rgbs = []
         self.all_masks = []
@@ -108,16 +104,8 @@ class DTUDataset(Dataset):
             image_path = images_lis[i]
             mask_path = masks_lis[i]
 
-            pose = pose_all[i]
-            c2w = torch.FloatTensor(pose)
-            self.poses += [c2w]
-
             img = Image.open(image_path) # rgb
             mask = Image.open(mask_path)
-            
-            if self.downsample!=1.0:
-                img = img.resize(self.img_wh, Image.LANCZOS)
-                mask = mask.resize(self.img_wh, Image.LANCZOS)
             
             img = self.transform(img)
             mask = self.transform(mask)
@@ -127,10 +115,9 @@ class DTUDataset(Dataset):
             img = img.reshape(h*w, 3)
             self.all_rgbs += [img]
 
-            rays_o, rays_d = get_rays(self.directions, c2w)  # both (h*w, 3)
+            rays_o, rays_d = self.gen_rays_at(h, w, i)
+            rays_o, rays_d = rays_o.reshape(h*w, 3), rays_d.reshape(h*w, 3)
             self.all_rays += [torch.cat([rays_o, rays_d], 1)]  # (h*w, 6)
-
-        self.poses = torch.stack(self.poses)
 
         if not self.is_stack:
             self.all_rays = torch.cat(self.all_rays, 0)  # (len(self.meta['frames])*h*w, 3)
@@ -139,6 +126,20 @@ class DTUDataset(Dataset):
             self.all_rays = torch.stack(self.all_rays, 0)  # (len(self.meta['frames]),h*w, 3)
             self.all_rgbs = torch.stack(self.all_rgbs, 0).reshape(-1,*self.img_wh[::-1], 3)  # (len(self.meta['frames]),h,w,3)
             # self.all_masks = torch.stack(self.all_masks, 0).reshape(-1,*self.img_wh[::-1])  # (len(self.meta['frames]),h,w,3)
+
+    def gen_rays_at(self, h, w, idx):
+        """
+        Generate rays at world space from one camera.
+        """
+        tx = torch.linspace(0, w, w)
+        ty = torch.linspace(0, h, h)
+        pixels_x, pixels_y = torch.meshgrid(tx, ty)
+        p = torch.stack([pixels_x, pixels_y, torch.ones_like(pixels_y)], dim=-1) # W, H, 3
+        p = torch.matmul(self.intrinsics_all_inv[idx, None, None, :3, :3], p[:, :, :, None]).squeeze()  # W, H, 3
+        rays_v = p / torch.linalg.norm(p, ord=2, dim=-1, keepdim=True)  # W, H, 3
+        rays_v = torch.matmul(self.pose_all[idx, None, None, :3, :3], rays_v[:, :, :, None]).squeeze()  # W, H, 3
+        rays_o = self.pose_all[idx, None, None, :3, 3].expand(rays_v.shape)  # W, H, 3
+        return rays_o.transpose(0, 1), rays_v.transpose(0, 1) # H, W, 3
 
     def define_transforms(self):
         self.transform = T.ToTensor()

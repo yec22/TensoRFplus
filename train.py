@@ -12,7 +12,7 @@ from dataLoader import dataset_dict
 import sys
 
 
-device = torch.device("cuda:5" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:4" if torch.cuda.is_available() else "cpu")
 
 renderer = OctreeRender_trilinear_fast
 
@@ -41,8 +41,8 @@ def export_mesh(args):
     tensorf = eval(args.model_name)(**kwargs)
     tensorf.load(ckpt)
 
-    alpha,_ = tensorf.getDenseAlpha([512,512,512])
-    convert_sdf_samples_to_ply(alpha.cpu(), f'{args.ckpt[:-3]}_512.ply',bbox=tensorf.aabb.cpu(), level=0.01)
+    alpha,_ = tensorf.getDenseAlpha([256, 256, 256])
+    convert_sdf_samples_to_ply(alpha.cpu(), f'{args.ckpt[:-3]}_256.ply',bbox=tensorf.aabb.cpu(), level=0.01)
 
 
 @torch.no_grad()
@@ -235,20 +235,15 @@ def reconstruction(args):
                                     prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, compute_extra_metrics=False,device=device)
             summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
             
-
-
-
         if iteration in update_AlphaMask_list:
 
             if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
                 reso_mask = reso_cur
             new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
             if iteration == update_AlphaMask_list[0]:
-                tensorf.shrink(new_aabb)
-                # tensorVM.alphaMask = None
+                # tensorf.shrink(new_aabb)
                 L1_reg_weight = args.L1_weight_rest
                 print("continuing L1_reg_weight", L1_reg_weight)
-
 
             if not args.ndc_ray and iteration == update_AlphaMask_list[1]:
                 # filter rays outside the bbox

@@ -63,7 +63,7 @@ def evaluation(test_dataset,tensorf, args, renderer, savePath=None, N_vis=5, prt
         rays = samples.view(-1,samples.shape[-1])
 
         near_far = get_near_far(rays[:,:3], rays[:,3:])
-        rgb_map, _, depth_map, _, _, normal_map, _, _ = renderer(rays, tensorf, chunk=2048, N_samples=N_samples,
+        rgb_map, _, depth_map, _, _, normal_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
                                         ndc_ray=ndc_ray, white_bg = white_bg, is_train=False, device=device)
         rgb_map = rgb_map.clamp(0.0, 1.0)
 

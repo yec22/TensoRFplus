@@ -7,12 +7,13 @@ class TensorVMSplit(TensorBase):
 
 
     def init_svd_volume(self, res, device):
-        self.density_volume = self.init_volume(self.gridSize, device)
+        self.coarse_density_volume = self.init_volume(self.sigma_dim, self.gridSize, device)
+
         self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.gridSize, 0.1, device)
         self.basis_mat = torch.nn.Linear(sum(self.app_n_comp), self.app_dim, bias=False).to(device)
 
-    def init_volume(self, gridSize, device):
-        feature_volume = [torch.nn.Parameter(torch.randn((1, self.sigma_dim, gridSize[2], gridSize[1], gridSize[0])))]
+    def init_volume(self, channel, gridSize, device):
+        feature_volume = [torch.nn.Parameter(torch.randn((1, channel, gridSize[2], gridSize[1], gridSize[0])))]
         return torch.nn.ParameterList(feature_volume).to(device)
 
     def init_one_svd(self, n_component, gridSize, scale, device):
@@ -28,7 +29,8 @@ class TensorVMSplit(TensorBase):
         return torch.nn.ParameterList(plane_coef).to(device), torch.nn.ParameterList(line_coef).to(device)
 
     def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001):
-        grad_vars = [{'params': self.density_volume, 'lr': lr_init_spatialxyz},
+        grad_vars = [{'params': self.coarse_density_volume, 'lr': lr_init_spatialxyz},
+                     
                      {'params': self.app_line, 'lr': lr_init_spatialxyz}, 
                      {'params': self.app_plane, 'lr': lr_init_spatialxyz},
                      {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
@@ -44,14 +46,16 @@ class TensorVMSplit(TensorBase):
     
     def density_L1(self):
         total = 0
-        for idx in range(len(self.density_volume)):
-            total = total + torch.mean(torch.abs(self.density_volume[idx])) + torch.mean(torch.abs(self.density_line[idx]))
+        for idx in range(len(self.coarse_density_volume)):
+            total = total + torch.mean(torch.abs(self.coarse_density_volume[idx]))
+        
         return total
     
     def TV_loss_density(self, reg):
         total = 0
-        for idx in range(len(self.density_volume)):
-            total = total + reg(self.density_volume[idx]) * 1e-2
+        for idx in range(len(self.coarse_density_volume)):
+            total = total + reg(self.coarse_density_volume[idx]) * 1e-2
+        
         return total
         
     def TV_loss_app(self, reg):
@@ -62,10 +66,10 @@ class TensorVMSplit(TensorBase):
 
     def compute_densityfeature(self, xyz_sampled):
         coordinate = xyz_sampled[...].view(1, -1, 1, 1, 3)
-        sigma_feature = grid_sample_3d(self.density_volume[0], coordinate,
+        sigma_feature_coarse = grid_sample_3d(self.coarse_density_volume[0], coordinate,
                                             ).view(-1, *xyz_sampled.shape[:1])
-
-        return sigma_feature.transpose(0, 1) # [N, feat_dim]
+        
+        return sigma_feature_coarse.transpose(0, 1) # [N, feat_dim]
 
 
     def compute_appfeature(self, xyz_sampled):
@@ -106,35 +110,34 @@ class TensorVMSplit(TensorBase):
     @torch.no_grad()
     def upsample_volume_grid(self, res_target):
         self.app_plane, self.app_line = self.up_sampling_VM(self.app_plane, self.app_line, res_target)
-        self.density_volume[0] = torch.nn.Parameter(F.interpolate(self.density_volume[0].data, size=(res_target[2], res_target[1], res_target[0]), mode='trilinear',
+        self.coarse_density_volume[0] = torch.nn.Parameter(F.interpolate(self.coarse_density_volume[0].data, size=(res_target[2], res_target[1], res_target[0]), mode='trilinear',
                               align_corners=True))
 
         self.update_stepSize(res_target)
         print(f'upsamping to {res_target}')
 
-    @torch.no_grad()
-    def shrink(self, new_aabb):
-        print("====> shrinking ...")
-        xyz_min, xyz_max = new_aabb
-        t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
-        t_l, b_r = torch.round(torch.round(t_l)).long(), torch.round(b_r).long() + 1
-        b_r = torch.stack([b_r, self.gridSize]).amin(0)
+    # @torch.no_grad()
+    # def shrink(self, new_aabb):
+    #     print("====> shrinking ...")
+    #     xyz_min, xyz_max = new_aabb
+    #     t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
+    #     t_l, b_r = torch.round(torch.round(t_l)).long(), torch.round(b_r).long() + 1
+    #     b_r = torch.stack([b_r, self.gridSize]).amin(0)
 
-        self.density_volume[0] = torch.nn.Parameter(
-                self.density_volume[0].data[...,t_l[2]:b_r[2],t_l[1]:b_r[1],t_l[0]:b_r[0]]
-            )
+    #     self.density_volume[0] = torch.nn.Parameter(
+    #             self.density_volume[0].data[...,t_l[2]:b_r[2],t_l[1]:b_r[1],t_l[0]:b_r[0]]
+    #         )
         
-        for i in range(len(self.vecMode)):
-            mode0 = self.vecMode[i]
-            self.app_line[i] = torch.nn.Parameter(
-                self.app_line[i].data[...,t_l[mode0]:b_r[mode0],:]
-            )
-            mode0, mode1 = self.matMode[i]
-            self.app_plane[i] = torch.nn.Parameter(
-                self.app_plane[i].data[...,t_l[mode1]:b_r[mode1],t_l[mode0]:b_r[mode0]]
-            )
+    #     for i in range(len(self.vecMode)):
+    #         mode0 = self.vecMode[i]
+    #         self.app_line[i] = torch.nn.Parameter(
+    #             self.app_line[i].data[...,t_l[mode0]:b_r[mode0],:]
+    #         )
+    #         mode0, mode1 = self.matMode[i]
+    #         self.app_plane[i] = torch.nn.Parameter(
+    #             self.app_plane[i].data[...,t_l[mode1]:b_r[mode1],t_l[mode0]:b_r[mode0]]
+    #         )
 
-        newSize = b_r - t_l
-        self.aabb = new_aabb
-        self.update_stepSize((newSize[0], newSize[1], newSize[2]))
-
+    #     newSize = b_r - t_l
+    #     self.aabb = new_aabb
+    #     self.update_stepSize((newSize[0], newSize[1], newSize[2]))

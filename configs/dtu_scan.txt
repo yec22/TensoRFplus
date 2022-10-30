@@ -1,16 +1,14 @@
 
 dataset_name = dtu
-datadir = ../data/dtu/dtu_scan105
-expname = tensorf_dtu_scan105_SP_VM
+datadir = ../data/dtu/dtu_scan122
+expname = tensorf_dtu_scan122_VM
 basedir = ./log
 
 n_iters = 30000
 batch_size = 4096
-downsample_train = 2.0
-downsample_test = 2.0
 
 N_voxel_init = 2097156 # 128**3
-N_voxel_final = 27000000 # 300**3
+N_voxel_final = 16777216 # 256**3
 upsamp_list = [2000,3000,4000,5500,7000]
 update_AlphaMask_list = [2000,4000]
 
@@ -19,7 +17,7 @@ vis_every = 2000
 
 render_test = 1
 
-n_lamb_sh = [18,18,18]
+n_lamb_sh = [8,8,8]
 model_name = TensorVMSplit
 
 shadingMode = MLP_Fea
@@ -27,6 +25,7 @@ fea2denseAct = softplus
 
 view_pe = 2
 fea_pe = 2
+pos_pe = 2
 
 TV_weight_density = 0.1
 TV_weight_app = 0.1
